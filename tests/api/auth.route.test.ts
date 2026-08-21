@@ -181,6 +181,49 @@ describe("POST /api/auth", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
+  it("omits Secure over plain HTTP so the cookie survives a container on localhost", async () => {
+    const github = new MockGitHub().onRest("GET", "/user", () => userHandler());
+    vi.stubGlobal("fetch", github.fetch);
+    vi.stubEnv("NODE_ENV", "production");
+
+    const response = await POST(authRequest({ body: { token: VALID_TOKEN } }));
+
+    expect(response.headers.get("set-cookie")).not.toContain("Secure");
+  });
+
+  it("adds Secure when the request arrived over HTTPS", async () => {
+    const github = new MockGitHub().onRest("GET", "/user", () => userHandler());
+    vi.stubGlobal("fetch", github.fetch);
+
+    const request = new Request("https://ghmanager.example.com/api/auth", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: VALID_TOKEN }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.headers.get("set-cookie")).toContain("Secure");
+  });
+
+  it("adds Secure when a TLS-terminating proxy says the client used HTTPS", async () => {
+    const github = new MockGitHub().onRest("GET", "/user", () => userHandler());
+    vi.stubGlobal("fetch", github.fetch);
+
+    const request = new Request("http://localhost:3000/api/auth", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-proto": "https, http",
+      },
+      body: JSON.stringify({ token: VALID_TOKEN }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.headers.get("set-cookie")).toContain("Secure");
+  });
+
   it("surfaces a forbidden token as a 403", async () => {
     const github = new MockGitHub().onRest("GET", "/user", () => ({
       status: 403,
@@ -198,7 +241,7 @@ describe("POST /api/auth", () => {
 
 describe("DELETE /api/auth", () => {
   it("clears the cookie and reports signed out", async () => {
-    const response = await DELETE();
+    const response = await DELETE(authRequest());
     const body = await response.json();
 
     expect(body.authenticated).toBe(false);
@@ -210,7 +253,7 @@ describe("DELETE /api/auth", () => {
     const github = new MockGitHub().onRest("GET", "/user", () => userHandler());
     vi.stubGlobal("fetch", github.fetch);
 
-    const response = await DELETE();
+    const response = await DELETE(authRequest());
     const body = await response.json();
 
     expect(body.authenticated).toBe(true);
@@ -226,7 +269,7 @@ describe("DELETE /api/auth", () => {
     }));
     vi.stubGlobal("fetch", github.fetch);
 
-    const body = await (await DELETE()).json();
+    const body = await (await DELETE(authRequest())).json();
 
     expect(body.authenticated).toBe(false);
     expect(body.error).toContain("not usable");

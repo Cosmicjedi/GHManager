@@ -65,10 +65,36 @@ export function resolveToken(
   return { token: null, source: "none" };
 }
 
+/**
+ * Whether the request reached us over HTTPS.
+ *
+ * The `Secure` cookie attribute must track the actual scheme, not NODE_ENV: a
+ * production build served over plain HTTP - which is exactly what a container
+ * on http://localhost:3000 or behind an unterminated proxy looks like - would
+ * otherwise set a Secure cookie that the browser silently drops, and sign-in
+ * would appear to succeed and then immediately fall back to signed out.
+ *
+ * `x-forwarded-proto` is honoured so a container behind a TLS-terminating
+ * proxy still gets Secure cookies.
+ */
+export function isSecureRequest(request: Request): boolean {
+  const forwarded = request.headers.get("x-forwarded-proto");
+  if (forwarded) {
+    // The header may be a comma-separated chain; the first hop is the client's.
+    return forwarded.split(",")[0].trim().toLowerCase() === "https";
+  }
+
+  try {
+    return new URL(request.url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** Build the `Set-Cookie` value that stores a token. */
 export function buildTokenCookie(
   token: string,
-  { secure = process.env.NODE_ENV === "production" }: { secure?: boolean } = {},
+  { secure = false }: { secure?: boolean } = {},
 ): string {
   const parts = [
     `${TOKEN_COOKIE}=${encodeURIComponent(token)}`,
@@ -83,7 +109,7 @@ export function buildTokenCookie(
 
 /** Build the `Set-Cookie` value that clears a stored token. */
 export function buildClearedTokenCookie({
-  secure = process.env.NODE_ENV === "production",
+  secure = false,
 }: { secure?: boolean } = {}): string {
   const parts = [
     `${TOKEN_COOKIE}=`,

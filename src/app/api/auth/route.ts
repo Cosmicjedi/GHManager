@@ -3,6 +3,7 @@ import {
   buildClearedTokenCookie,
   buildTokenCookie,
   environmentToken,
+  isSecureRequest,
   looksLikeToken,
   parseScopes,
   resolveToken,
@@ -101,7 +102,10 @@ export async function GET(request: Request): Promise<NextResponse<AuthResponse>>
     // A dead cookie token is cleared so the UI falls back to the token
     // configured on the server, if there is one.
     if (source === "cookie") {
-      response.headers.append("Set-Cookie", buildClearedTokenCookie());
+      response.headers.append(
+        "Set-Cookie",
+        buildClearedTokenCookie({ secure: isSecureRequest(request) }),
+      );
     }
     return response;
   }
@@ -133,7 +137,10 @@ export async function POST(request: Request): Promise<NextResponse<AuthResponse>
   try {
     const { viewer, scopes } = await inspectToken(token.trim());
     const response = NextResponse.json<AuthResponse>(statusFor("cookie", viewer, scopes));
-    response.headers.append("Set-Cookie", buildTokenCookie(token.trim()));
+    response.headers.append(
+      "Set-Cookie",
+      buildTokenCookie(token.trim(), { secure: isSecureRequest(request) }),
+    );
     return response;
   } catch (error) {
     if (error instanceof GitHubError && error.status === 401) {
@@ -159,26 +166,27 @@ export async function POST(request: Request): Promise<NextResponse<AuthResponse>
 }
 
 /** Forget the UI-supplied token. */
-export async function DELETE(): Promise<NextResponse<AuthResponse>> {
+export async function DELETE(request: Request): Promise<NextResponse<AuthResponse>> {
+  const cleared = buildClearedTokenCookie({ secure: isSecureRequest(request) });
   const fallback = environmentToken();
 
   if (!fallback) {
     const response = NextResponse.json<AuthResponse>(SIGNED_OUT);
-    response.headers.append("Set-Cookie", buildClearedTokenCookie());
+    response.headers.append("Set-Cookie", cleared);
     return response;
   }
 
   try {
     const { viewer, scopes } = await inspectToken(fallback);
     const response = NextResponse.json<AuthResponse>(statusFor("env", viewer, scopes));
-    response.headers.append("Set-Cookie", buildClearedTokenCookie());
+    response.headers.append("Set-Cookie", cleared);
     return response;
   } catch {
     const response = NextResponse.json<AuthResponse>({
       ...SIGNED_OUT,
       error: "Signed out. The token configured on the server is not usable.",
     });
-    response.headers.append("Set-Cookie", buildClearedTokenCookie());
+    response.headers.append("Set-Cookie", cleared);
     return response;
   }
 }

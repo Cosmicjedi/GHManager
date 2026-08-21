@@ -1,0 +1,30 @@
+services:
+  ghmanager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghmanager:latest
+    container_name: ghmanager
+    # Host port is overridable because 3000 is a busy default:
+    #   GHMANAGER_PORT=3100 docker compose up -d
+    ports:
+      - "${GHMANAGER_PORT:-3000}:3000"
+    environment:
+      # Optional. Leave unset to paste a token into the UI instead.
+      # Provide it in a .env file next to this compose file, or export it.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Uncomment for GitHub Enterprise Server.
+      # GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-}
+      # GITHUB_GRAPHQL_URL: ${GITHUB_GRAPHQL_URL:-}
+    restart: unless-stopped
+    # The image's own HEALTHCHECK calls /api/auth; compose surfaces it in `ps`.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/auth').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

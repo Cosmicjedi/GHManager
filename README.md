@@ -36,6 +36,63 @@ On first load you get a token screen. Paste a GitHub personal access token and
 GHManager verifies it against `GET /user` before storing it. Alternatively set
 `GITHUB_TOKEN` in `.env.local` and the app starts already connected.
 
+## Run it in Docker
+
+```bash
+docker build -t ghmanager:latest .
+docker run -d --name ghmanager -p 3000:3000 ghmanager:latest
+# open http://localhost:3000 and paste a token
+```
+
+Or with Compose, which reads `GITHUB_TOKEN` from a `.env` file beside
+`docker-compose.yml` if you have one:
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+docker compose down
+```
+
+If port 3000 is already taken:
+
+```bash
+docker run -d --name ghmanager -p 3100:3000 ghmanager:latest   # plain docker
+GHMANAGER_PORT=3100 docker compose up -d                        # compose
+```
+
+To start already connected, pass the token instead of pasting one:
+
+```bash
+docker run -d --name ghmanager -p 3000:3000 \
+  -e GITHUB_TOKEN=ghp_your_token_here ghmanager:latest
+```
+
+Point at GitHub Enterprise Server by adding
+`-e GITHUB_API_BASE_URL=... -e GITHUB_GRAPHQL_URL=...`.
+
+### About the image
+
+Multi-stage build on `node:22-alpine` producing a ~314 MB image from Next.js
+standalone output: `server.js`, only the reachable `node_modules`, and the
+static assets. No source, no dev dependencies. It runs as the unprivileged
+`node` user and binds `0.0.0.0` so the port publish works.
+
+The `HEALTHCHECK` calls `/api/auth` rather than just checking the process, so
+an unhealthy container is one that genuinely cannot serve requests. Watch it
+with `docker ps` or `docker inspect --format '{{.State.Health.Status}}' ghmanager`.
+
+### Cookie scheme and HTTPS
+
+The `Secure` cookie attribute follows the request scheme, not `NODE_ENV`. A
+container runs `NODE_ENV=production` but is usually reached over plain HTTP,
+and a `Secure` cookie on a non-HTTPS origin is silently dropped by the browser
+— sign-in would look like it worked and then immediately revert to signed out.
+GHManager omits `Secure` over HTTP and sets it when the request arrives over
+HTTPS, including via `x-forwarded-proto` from a TLS-terminating proxy.
+
+Because the token cookie is `SameSite=Strict` and `HttpOnly`, put the container
+behind HTTPS if you expose it beyond your own machine.
+
 ### Token scopes
 
 | Token type    | What to grant                                                                                  |
@@ -65,6 +122,7 @@ GITHUB_GRAPHQL_URL=https://github.example.com/api/graphql
 | `npm test`          | Full Vitest suite, one pass                           |
 | `npm run test:watch`| Vitest in watch mode                                  |
 | `npm run verify`    | typecheck → test → build                              |
+| `docker compose up -d --build` | Build and run the container            |
 
 ## Project structure
 
@@ -171,7 +229,7 @@ the summary panel lists each failure with a **Retry failed** button.
 npm test
 ```
 
-226 tests across 14 files:
+233 tests across 14 files:
 
 | Area                       | Covers                                                                       |
 | -------------------------- | ---------------------------------------------------------------------------- |
@@ -179,7 +237,7 @@ npm test
 | `tests/lib/mappers`        | Check rollups, enum coercion, every mergeability branch                       |
 | `tests/lib/pulls`          | Repo pagination, alias batching, per-repo PR pagination, partial failure      |
 | `tests/lib/merge`          | Success, 405/409/422/403/404, bulk ordering, partial failure                  |
-| `tests/lib/auth`           | Cookie parsing, precedence, cookie construction, token shape, scopes          |
+| `tests/lib/auth`           | Cookie parsing, precedence, cookie construction, scheme-derived `Secure`, scopes |
 | `tests/lib/filters`        | Search, filters, five sorts, selection helpers                                |
 | `tests/lib/utils`          | Relative time, label contrast, bounded concurrency, TTL cache                 |
 | `tests/api/*`              | All three route handlers, including caching and validation                    |

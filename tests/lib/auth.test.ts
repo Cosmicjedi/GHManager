@@ -4,6 +4,7 @@ import {
   buildClearedTokenCookie,
   buildTokenCookie,
   environmentToken,
+  isSecureRequest,
   looksLikeToken,
   parseCookies,
   parseScopes,
@@ -136,5 +137,34 @@ describe("parseScopes", () => {
   it("returns an empty list for a fine-grained token", () => {
     expect(parseScopes("")).toEqual([]);
     expect(parseScopes(null)).toEqual([]);
+  });
+});
+
+describe("isSecureRequest", () => {
+  it("is false for plain HTTP", () => {
+    expect(isSecureRequest(new Request("http://localhost:3000/api/auth"))).toBe(false);
+  });
+
+  it("is true for HTTPS", () => {
+    expect(isSecureRequest(new Request("https://ghmanager.example.com/api/auth"))).toBe(true);
+  });
+
+  it("trusts x-forwarded-proto from a terminating proxy", () => {
+    const request = new Request("http://localhost:3000/api/auth", {
+      headers: { "x-forwarded-proto": "https" },
+    });
+    expect(isSecureRequest(request)).toBe(true);
+  });
+
+  it("reads only the first hop of a forwarded chain", () => {
+    const secure = new Request("http://localhost:3000/api/auth", {
+      headers: { "x-forwarded-proto": "https, http" },
+    });
+    const insecure = new Request("http://localhost:3000/api/auth", {
+      headers: { "x-forwarded-proto": "http, https" },
+    });
+
+    expect(isSecureRequest(secure)).toBe(true);
+    expect(isSecureRequest(insecure)).toBe(false);
   });
 });
