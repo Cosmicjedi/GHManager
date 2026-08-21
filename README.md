@@ -53,12 +53,24 @@ docker compose logs -f
 docker compose down
 ```
 
-If port 3000 is already taken:
+If port 3000 is already taken, publish somewhere else. Port 80 is worth
+considering because it makes the bare `http://localhost` work with no port to
+remember or mistype:
 
 ```bash
-docker run -d --name ghmanager -p 3100:3000 ghmanager:latest   # plain docker
-GHMANAGER_PORT=3100 docker compose up -d                        # compose
+docker run -d --name ghmanager -p 80:3000 ghmanager:latest   # -> http://localhost
+GHMANAGER_PORT=80 docker compose up -d                       # same, via compose
 ```
+
+A container can publish more than one host port, so you can have both:
+
+```bash
+docker run -d --name ghmanager -p 80:3000 -p 3100:3000 ghmanager:latest
+```
+
+Note that the container logs print `Local: http://localhost:3000` on startup.
+That is the port *inside* the container and it ignores your `-p` mapping —
+trust `docker ps` for the address you actually browse to.
 
 To start already connected, pass the token instead of pasting one:
 

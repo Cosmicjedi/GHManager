@@ -6,7 +6,8 @@ services:
     image: ghmanager:latest
     container_name: ghmanager
     # Host port is overridable because 3000 is a busy default:
-    #   GHMANAGER_PORT=3100 docker compose up -d
+    #   GHMANAGER_PORT=80   docker compose up -d   -> http://localhost
+    #   GHMANAGER_PORT=3100 docker compose up -d   -> http://localhost:3100
     ports:
       - "${GHMANAGER_PORT:-3000}:3000"
     environment:
