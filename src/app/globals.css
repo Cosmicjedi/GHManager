@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+/*
+ * GHManager design tokens.
+ *
+ * Every colour is declared once as a plain custom property on :root, then
+ * re-declared for dark mode. `@theme inline` maps them to Tailwind utilities
+ * (bg-surface, text-fg-muted, border-border, ...) so components never hardcode
+ * a hex value and both themes stay in sync.
+ */
+
+:root {
+  --canvas: #f5f7fa;
+  --surface: #ffffff;
+  --surface-muted: #f1f4f8;
+  --surface-raised: #ffffff;
+  --border: #d9e0e8;
+  --border-strong: #bcc7d4;
+  --fg: #10151c;
+  --fg-muted: #5a6673;
+  --fg-subtle: #8792a1;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-fg: #ffffff;
+  --accent-soft: #e6edfd;
+  --success: #0f7a45;
+  --success-soft: #e3f6ec;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --warning: #9a5b06;
+  --warning-soft: #fdf3e0;
+  --neutral-soft: #eaeef3;
+  --overlay: rgba(15, 23, 32, 0.45);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 8px 24px rgba(16, 24, 40, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas: #0b0f15;
+    --surface: #141a22;
+    --surface-muted: #1b222c;
+    --surface-raised: #1b222c;
+    --border: #29313c;
+    --border-strong: #3b4552;
+    --fg: #e6edf3;
+    --fg-muted: #94a3b3;
+    --fg-subtle: #6b7887;
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --accent-fg: #06101f;
+    --accent-soft: #16233a;
+    --success: #4ade80;
+    --success-soft: #10241a;
+    --danger: #f87171;
+    --danger-soft: #2a1416;
+    --warning: #fbbf24;
+    --warning-soft: #2a2010;
+    --neutral-soft: #202834;
+    --overlay: rgba(2, 6, 12, 0.6);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+}
+
+[data-theme="dark"] {
+  --canvas: #0b0f15;
+  --surface: #141a22;
+  --surface-muted: #1b222c;
+  --surface-raised: #1b222c;
+  --border: #29313c;
+  --border-strong: #3b4552;
+  --fg: #e6edf3;
+  --fg-muted: #94a3b3;
+  --fg-subtle: #6b7887;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-fg: #06101f;
+  --accent-soft: #16233a;
+  --success: #4ade80;
+  --success-soft: #10241a;
+  --danger: #f87171;
+  --danger-soft: #2a1416;
+  --warning: #fbbf24;
+  --warning-soft: #2a2010;
+  --neutral-soft: #202834;
+  --overlay: rgba(2, 6, 12, 0.6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-neutral-soft: var(--neutral-soft);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--canvas);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Thin, theme-aware scrollbars for the table body. */
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.scroll-area::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll-area::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+@keyframes ghm-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ghm-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.animate-ghm-spin {
+  animation: ghm-spin 0.7s linear infinite;
+}
+
+.animate-ghm-pulse {
+  animation: ghm-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ghm-spin,
+  .animate-ghm-pulse {
+    animation: none;
+  }
+}
