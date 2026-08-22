@@ -1,0 +1,27 @@
+# Build artefacts and dependencies are produced inside the image.
+node_modules
+.next
+out
+build
+coverage
+
+# Never let a real token reach the build context.
+.env
+.env.local
+.env*.local
+
+# Not needed at runtime.
+tests
+.git
+.github
+.vscode
+.idea
+README.md
+*.md
+!next-env.d.ts
+Dockerfile
+.dockerignore
+docker-compose.yml
+*.log
+*.tsbuildinfo
+.DS_Store
