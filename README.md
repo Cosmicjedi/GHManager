@@ -44,8 +44,8 @@ docker run -d --name ghmanager -p 3000:3000 ghmanager:latest
 # open http://localhost:3000 and paste a token
 ```
 
-Or with Compose, which reads `GITHUB_TOKEN` from a `.env` file beside
-`docker-compose.yml` if you have one:
+Compose is the better way, because it also handles restarting. It reads
+`GITHUB_TOKEN` from a `.env` file beside `docker-compose.yml` if you have one:
 
 ```bash
 docker compose up -d --build
@@ -53,24 +53,39 @@ docker compose logs -f
 docker compose down
 ```
 
-If port 3000 is already taken, publish somewhere else. Port 80 is worth
-considering because it makes the bare `http://localhost` work with no port to
-remember or mistype:
+That publishes **http://localhost** (port 80) and **http://localhost:3100**.
+Port 80 means there is no port to remember or mistype; 3100 is there because 80
+is easy to lose to IIS, Skype or another web server. Override either:
 
 ```bash
-docker run -d --name ghmanager -p 80:3000 ghmanager:latest   # -> http://localhost
-GHMANAGER_PORT=80 docker compose up -d                       # same, via compose
-```
-
-A container can publish more than one host port, so you can have both:
-
-```bash
-docker run -d --name ghmanager -p 80:3000 -p 3100:3000 ghmanager:latest
+GHMANAGER_PORT=3000 GHMANAGER_ALT_PORT=3100 docker compose up -d
 ```
 
 Note that the container logs print `Local: http://localhost:3000` on startup.
-That is the port *inside* the container and it ignores your `-p` mapping —
+That is the port *inside* the container and it ignores your port mapping —
 trust `docker ps` for the address you actually browse to.
+
+### Starting automatically
+
+The service sets `restart: unless-stopped`, so the Docker daemon starts
+GHManager every time it starts, and restarts the container if it crashes.
+`unless-stopped` rather than `always` means an explicit `docker compose stop`
+stays stopped instead of coming back by itself; `docker compose up -d` re-arms
+it.
+
+That only helps once the daemon is running, so Docker Desktop has to start too.
+On Windows and macOS that is **Settings → General → Start Docker Desktop when
+you sign in**. Without it the container waits for you to launch Docker by hand.
+
+Check what the container currently carries:
+
+```bash
+docker inspect ghmanager --format '{{.HostConfig.RestartPolicy.Name}}'   # unless-stopped
+```
+
+A container started with `docker run` and no `--restart` reports `no` and stays
+dead after a reboot. Remove it and let Compose own it:
+`docker rm -f ghmanager && docker compose up -d`.
 
 To start already connected, pass the token instead of pasting one:
 
