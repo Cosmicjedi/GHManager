@@ -37,13 +37,37 @@ export function Dashboard() {
   const [mergeMethod, setMergeMethod] = useState<MergeMethod>("merge");
   const [pendingMerge, setPendingMerge] = useState<PullRequest[] | null>(null);
   const [mergingIds, setMergingIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Pull requests this session merged. GitHub's open-PR list is eventually
+  // consistent, so a merged pull request often comes back as open on the very
+  // next read; keeping the ids here hides those rows until GitHub agrees.
+  const [mergedIds, setMergedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [results, setResults] = useState<ReadonlyMap<string, MergeResult>>(() => new Map());
   const [summary, setSummary] = useState<MergePayload | null>(null);
   const [mergeError, setMergeError] = useState<string | null>(null);
 
-  const allPullRequests = useMemo(
+  const fetchedPullRequests = useMemo(
     () => pullsQuery.data?.pullRequests ?? [],
     [pullsQuery.data],
+  );
+
+  // Stop suppressing a merged pull request once GitHub stops reporting it as
+  // open, so the set cannot grow for the lifetime of the tab.
+  useEffect(() => {
+    setMergedIds((current) => {
+      if (current.size === 0) return current;
+      const present = new Set(fetchedPullRequests.map((pullRequest) => pullRequest.id));
+      const next = new Set<string>();
+      for (const id of current) if (present.has(id)) next.add(id);
+      return next.size === current.size ? current : next;
+    });
+  }, [fetchedPullRequests]);
+
+  const allPullRequests = useMemo(
+    () =>
+      mergedIds.size === 0
+        ? fetchedPullRequests
+        : fetchedPullRequests.filter((pullRequest) => !mergedIds.has(pullRequest.id)),
+    [fetchedPullRequests, mergedIds],
   );
 
   const visiblePullRequests = useMemo(
@@ -133,6 +157,8 @@ export function Dashboard() {
         );
       }
 
+      let mergeAnswered = false;
+
       try {
         const payload = await mergeMutation.mutateAsync({
           items: targets.map((pullRequest) => ({
@@ -154,27 +180,26 @@ export function Dashboard() {
         });
 
         setSummary(payload);
+        mergeAnswered = true;
 
-        // Merged pull requests are gone from GitHub's open list; drop them from
-        // the selection so a second click cannot retry them.
-        const mergedIds = new Set(
+        const justMerged = new Set(
           payload.results
             .filter((result) => result.status === "merged")
             .map((result) => idByKey.get(keyOf(result.owner, result.repo, result.number)))
             .filter((id): id is string => Boolean(id)),
         );
-        if (mergedIds.size > 0) {
+        if (justMerged.size > 0) {
+          // Take the merged rows out of the table straight away rather than
+          // waiting on the refresh, and keep them out until GitHub's open list
+          // catches up. Dropping them from the selection stops a second click
+          // from retrying a pull request that is already merged.
+          setMergedIds((current) => new Set([...current, ...justMerged]));
           setSelectedIds((current) => {
             const next = new Set(current);
-            for (const id of mergedIds) next.delete(id);
+            for (const id of justMerged) next.delete(id);
             return next;
           });
         }
-
-        await refresh().catch(() => {
-          // A failed background refresh must not mask the merge outcome; the
-          // user can hit Refresh manually.
-        });
       } catch (error) {
         if (error instanceof ApiError && error.requiresAuth) {
           await authQuery.refetch();
@@ -183,8 +208,18 @@ export function Dashboard() {
           error instanceof Error ? error.message : "The merge request could not be sent.",
         );
       } finally {
+        // Close the dialog as soon as GitHub has answered. The refresh below
+        // re-walks every repository and can take a while; leaving the modal up
+        // for that makes a finished merge look like a hung one.
         setMergingIds(new Set());
         setPendingMerge(null);
+      }
+
+      if (mergeAnswered) {
+        await refresh().catch(() => {
+          // A failed background refresh must not mask the merge outcome; the
+          // user can hit Refresh manually.
+        });
       }
     },
     [authQuery, mergeMethod, mergeMutation, refresh],
