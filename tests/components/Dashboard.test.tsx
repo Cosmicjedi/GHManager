@@ -583,6 +583,66 @@ describe("Dashboard bulk merge", () => {
     await waitFor(() => expect(screen.queryByTestId("merge-summary")).not.toBeInTheDocument());
   });
 
+  it("closes the dialog as soon as the merge answers, without waiting on the refresh", async () => {
+    let pullsRequests = 0;
+    let releaseRefresh = () => {};
+    // The post-merge refresh re-walks every repository, so hold it open and
+    // check the dialog is gone while it is still in flight.
+    const refreshHeld = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    server.use(
+      http.get(`${ORIGIN}/api/pulls`, async () => {
+        pullsRequests += 1;
+        if (pullsRequests > 1) await refreshHeld;
+        return HttpResponse.json(pullsPayload(pullsRequests === 1 ? [readyPr()] : []));
+      }),
+    );
+    useMergeHandler(() => allMerged([{ owner: "acme", repo: "api", number: 101 }]));
+
+    const { user } = await renderDashboard();
+    await waitForTable();
+
+    await user.click(
+      within(screen.getByTestId("pr-row-pr-ready")).getByRole("button", { name: "Merge" }),
+    );
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Merge 1" }),
+    );
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByTestId("merge-summary")).toHaveTextContent(
+      "Merged 1 pull request.",
+    );
+    expect(pullsRequests).toBe(2);
+
+    releaseRefresh();
+    await screen.findByTestId("empty-state");
+  });
+
+  it("removes merged rows immediately and keeps them out of a stale refresh", async () => {
+    // GitHub's open pull request list is eventually consistent, so the refresh
+    // right after a merge can still report the pull request as open.
+    usePulls(pullsPayload([readyPr(), secondReadyPr()]));
+    useMergeHandler(() => allMerged([{ owner: "acme", repo: "api", number: 101 }]));
+
+    const { user } = await renderDashboard();
+    await waitForTable();
+
+    await user.click(
+      within(screen.getByTestId("pr-row-pr-ready")).getByRole("button", { name: "Merge" }),
+    );
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Merge 1" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("pr-row-pr-ready")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("pr-row-pr-ready-2")).toBeInTheDocument();
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Showing 1 of 1 open pull request");
+  });
+
   it("refreshes the list after a merge completes", async () => {
     let pullsRequests = 0;
     server.use(
