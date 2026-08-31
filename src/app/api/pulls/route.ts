@@ -3,6 +3,7 @@ import { resolveToken } from "@/lib/auth";
 import { GitHubClient } from "@/lib/github/client";
 import { GitHubError } from "@/lib/github/errors";
 import { fetchAllOpenPullRequests } from "@/lib/github/pulls";
+import { trackTokenForBackgroundRefresh } from "@/lib/server/backgroundRefresh";
 import {
   invalidatePullRequestCache,
   readPullRequestCache,
@@ -58,6 +59,9 @@ export async function GET(request: Request): Promise<Response> {
       { status: 401 },
     );
   }
+
+  // Whoever loads the dashboard gets their cache kept warm from now on.
+  trackTokenForBackgroundRefresh(token);
 
   const url = new URL(request.url);
   const refreshParam = url.searchParams.get("refresh");

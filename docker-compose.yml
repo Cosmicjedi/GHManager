@@ -16,6 +16,10 @@ services:
       # Optional. Leave unset to paste a token into the UI instead.
       # Provide it in a .env file next to this compose file, or export it.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # How often the server re-scans GitHub in the background, in
+      # milliseconds. Defaults to 5 minutes (300000); minimum 1 minute. The
+      # background scan keeps the cache warm so page loads are always fast.
+      GHMANAGER_REFRESH_INTERVAL_MS: ${GHMANAGER_REFRESH_INTERVAL_MS:-}
       # Uncomment for GitHub Enterprise Server.
       # GITHUB_API_BASE_URL: ${GITHUB_API_BASE_URL:-}
       # GITHUB_GRAPHQL_URL: ${GITHUB_GRAPHQL_URL:-}

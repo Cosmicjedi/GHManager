@@ -16,6 +16,14 @@ import type { MergePayload, PullRequestsPayload } from "@/lib/types";
 export const AUTH_QUERY_KEY = ["auth"] as const;
 export const PULLS_QUERY_KEY = ["pull-requests"] as const;
 
+/**
+ * An open tab re-reads the server cache once a minute. The server keeps that
+ * cache warm in the background, so this normally costs one cheap round trip -
+ * no GitHub traffic - and the page stays current without anyone clicking
+ * Refresh.
+ */
+export const PULLS_POLL_INTERVAL_MS = 60_000;
+
 /** Current auth status, plus sign in / sign out mutations. */
 export function useAuth() {
   const queryClient = useQueryClient();
@@ -65,6 +73,7 @@ export function usePullRequests(enabled: boolean) {
       }
     },
     enabled,
+    refetchInterval: PULLS_POLL_INTERVAL_MS,
   });
 
   /** Force a server-side refetch that bypasses the short-lived cache. */

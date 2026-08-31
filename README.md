@@ -163,7 +163,7 @@ src/
 │  ├─ error.tsx, not-found.tsx   Route-level fallbacks
 │  └─ api/
 │     ├─ auth/route.ts           GET status · POST sign in · DELETE sign out
-│     ├─ pulls/route.ts          GET every open PR (45s server cache)
+│     ├─ pulls/route.ts          GET every open PR (streamed; warm server cache)
 │     └─ merge/route.ts          POST single or bulk merge
 ├─ components/
 │  ├─ Dashboard.tsx              Orchestration: auth gate, data, selection, merge
@@ -212,9 +212,16 @@ A repository that fails is recorded as a warning and shown in the UI — one bad
 repo never sinks the whole load. `rateLimit` is requested on every document, so
 the header can show remaining points and what the load cost.
 
-Results are cached server-side for 45 seconds, keyed by a SHA-256 fingerprint of
-the token (never the token itself). **Refresh** sends `?refresh=1` to bypass it,
-and any merge invalidates it immediately.
+Results are cached server-side, keyed by a SHA-256 fingerprint of the token
+(never the token itself), and a background loop re-scans GitHub every 5 minutes
+for every token the server knows about — the `GITHUB_TOKEN` from the
+environment plus any token recently used against the API — so the cache is
+always warm and a page load never waits on a scan. One cycle runs immediately
+at startup, the interval is configurable with `GHMANAGER_REFRESH_INTERVAL_MS`
+(milliseconds, minimum 60000), and a token GitHub rejects is dropped from the
+loop. An open dashboard tab re-reads the warm cache once a minute, so the
+page stays current on its own. **Refresh** sends `?refresh=1` to bypass the
+cache for an immediate re-scan, and any merge invalidates it immediately.
 
 ## How merging works
 
