@@ -12,9 +12,13 @@ services:
     ports:
       - "${GHMANAGER_PORT:-80}:3000"
       - "${GHMANAGER_ALT_PORT:-3100}:3000"
+    # Tokens added on the /tokens page live here, so they survive rebuilds
+    # and never need to be put in a text file.
+    volumes:
+      - ghmanager-data:/app/data
     environment:
-      # Optional. Leave unset to paste a token into the UI instead.
-      # Provide it in a .env file next to this compose file, or export it.
+      # Optional legacy fallback. Prefer adding tokens on the /tokens page;
+      # anything added there takes priority over this variable.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # How often the server re-scans GitHub in the background, in
       # milliseconds. Defaults to 5 minutes (300000); minimum 1 minute. The
@@ -39,3 +43,6 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+volumes:
+  ghmanager-data:

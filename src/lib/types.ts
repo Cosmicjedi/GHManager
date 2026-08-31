@@ -141,7 +141,7 @@ export interface Viewer {
   url: string;
 }
 
-export type TokenSource = "cookie" | "env" | "none";
+export type TokenSource = "cookie" | "stored" | "env" | "none";
 
 export interface AuthStatus {
   authenticated: boolean;
@@ -151,6 +151,31 @@ export interface AuthStatus {
   scopes: string[];
   /** True when the token is provided by the server environment and the UI must not offer to sign out. */
   managedByServer: boolean;
+}
+
+/**
+ * What the token management UI is allowed to see about a stored server token.
+ * The raw token never leaves the server once it has been added.
+ */
+export interface ServerTokenSummary {
+  /** Stable id - a fingerprint of the token, never the token itself. */
+  id: string;
+  label: string;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  url: string;
+  /** e.g. "ghp_...abcd" - enough to recognise, never enough to use. */
+  maskedToken: string;
+  addedAt: string;
+  /** True for the token that drives the dashboard when nobody signed in personally. */
+  active: boolean;
+}
+
+export interface ServerTokensPayload {
+  tokens: ServerTokenSummary[];
+  /** True when a GITHUB_TOKEN/GH_TOKEN is also configured in the environment. */
+  envTokenConfigured: boolean;
 }
 
 export interface PullRequestsPayload {

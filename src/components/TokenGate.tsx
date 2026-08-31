@@ -113,9 +113,15 @@ export function TokenGate({ onSubmit, isSubmitting, error }: TokenGateProps) {
                 </a>
               </p>
               <p className="text-xs">
-                Prefer not to paste it here? Put{" "}
-                <span className="font-mono text-fg">GITHUB_TOKEN</span> in{" "}
-                <span className="font-mono text-fg">.env.local</span> and restart the server.
+                Sharing this GHManager, or tired of re-pasting?{" "}
+                <a
+                  className="font-medium text-accent underline underline-offset-2"
+                  href="/tokens"
+                >
+                  Add a server token
+                </a>{" "}
+                instead - it is stored on the server, survives restarts, and signs
+                everyone in automatically.
               </p>
             </div>
           </div>

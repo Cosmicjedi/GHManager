@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { resolveToken } from "@/lib/auth";
 import { GitHubClient } from "@/lib/github/client";
 import { MAX_BULK_MERGE_ITEMS } from "@/lib/constants";
 import { isMergeMethod, mergePullRequests } from "@/lib/github/merge";
 import { invalidatePullRequestCache } from "@/lib/server/pullCache";
+import { resolveRequestToken } from "@/lib/server/requestToken";
 import type { MergePayload, MergeRequestItem } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -24,7 +24,7 @@ interface MergeRequestBody {
 export async function POST(
   request: Request,
 ): Promise<NextResponse<MergePayload | MergeErrorResponse>> {
-  const { token } = resolveToken(request);
+  const { token } = resolveRequestToken(request);
 
   if (!token) {
     return NextResponse.json<MergeErrorResponse>(

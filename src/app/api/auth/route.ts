@@ -5,22 +5,15 @@ import {
   environmentToken,
   isSecureRequest,
   looksLikeToken,
-  parseScopes,
-  resolveToken,
 } from "@/lib/auth";
-import { GitHubClient } from "@/lib/github/client";
 import { GitHubError } from "@/lib/github/errors";
+import { inspectToken } from "@/lib/github/identity";
+import { resolveRequestToken } from "@/lib/server/requestToken";
+import { getActiveStoredToken } from "@/lib/server/tokenStore";
 import type { AuthStatus, TokenSource, Viewer } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-interface RestUser {
-  login: string;
-  name: string | null;
-  avatar_url: string | null;
-  html_url: string;
-}
 
 export interface AuthResponse extends AuthStatus {
   error: string | null;
@@ -35,28 +28,6 @@ const SIGNED_OUT: AuthResponse = {
   error: null,
 };
 
-/** Verify a token and return the identity behind it. */
-async function inspectToken(token: string): Promise<{ viewer: Viewer; scopes: string[] }> {
-  const client = new GitHubClient(token);
-  const { data, response } = await client.rest<RestUser>("/user");
-
-  if (!data?.login) {
-    throw new GitHubError("GitHub did not return an account for this token.", {
-      status: 502,
-    });
-  }
-
-  return {
-    viewer: {
-      login: data.login,
-      name: data.name,
-      avatarUrl: data.avatar_url,
-      url: data.html_url,
-    },
-    scopes: parseScopes(response.headers.get("x-oauth-scopes")),
-  };
-}
-
 function statusFor(
   source: TokenSource,
   viewer: Viewer,
@@ -67,7 +38,9 @@ function statusFor(
     source,
     viewer,
     scopes,
-    managedByServer: source === "env",
+    // Both an environment token and a stored token belong to the server, not
+    // to this browser - there is nothing for "sign out" to clear.
+    managedByServer: source === "env" || source === "stored",
     error: null,
   };
 }
@@ -81,7 +54,7 @@ function failure(message: string, source: TokenSource, status: number): NextResp
 
 /** Current authentication status for the dashboard. */
 export async function GET(request: Request): Promise<NextResponse<AuthResponse>> {
-  const { token, source } = resolveToken(request);
+  const { token, source } = resolveRequestToken(request);
 
   if (!token) {
     return NextResponse.json<AuthResponse>(SIGNED_OUT);
@@ -168,7 +141,12 @@ export async function POST(request: Request): Promise<NextResponse<AuthResponse>
 /** Forget the UI-supplied token. */
 export async function DELETE(request: Request): Promise<NextResponse<AuthResponse>> {
   const cleared = buildClearedTokenCookie({ secure: isSecureRequest(request) });
-  const fallback = environmentToken();
+
+  // After the cookie is gone the dashboard falls back to whatever the server
+  // has: the active stored token first, then the environment token.
+  const stored = getActiveStoredToken();
+  const fallback = stored?.token ?? environmentToken();
+  const fallbackSource: TokenSource = stored ? "stored" : "env";
 
   if (!fallback) {
     const response = NextResponse.json<AuthResponse>(SIGNED_OUT);
@@ -178,7 +156,9 @@ export async function DELETE(request: Request): Promise<NextResponse<AuthRespons
 
   try {
     const { viewer, scopes } = await inspectToken(fallback);
-    const response = NextResponse.json<AuthResponse>(statusFor("env", viewer, scopes));
+    const response = NextResponse.json<AuthResponse>(
+      statusFor(fallbackSource, viewer, scopes),
+    );
     response.headers.append("Set-Cookie", cleared);
     return response;
   } catch {

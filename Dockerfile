@@ -43,9 +43,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 # Bind to every interface; the container's loopback is not reachable from the host.
 ENV HOSTNAME=0.0.0.0
+# Where the managed token store lives; mount a volume here so tokens added
+# through the UI survive container rebuilds.
+ENV GHMANAGER_DATA_DIR=/app/data
 
 # Run unprivileged. The node image already ships a `node` user (uid 1000).
-RUN mkdir -p /app && chown -R node:node /app
+# The data directory is created with the right owner so a named volume
+# inherits it on first use.
+RUN mkdir -p /app/data && chown -R node:node /app
 
 # `standalone` contains server.js plus a pruned node_modules; the static
 # directory is served by that server and has to be copied alongside it.

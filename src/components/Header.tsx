@@ -72,6 +72,14 @@ export function Header({
             {isRefreshing ? "Refreshing" : "Refresh"}
           </Button>
 
+          <a
+            href="/tokens"
+            title="Manage the tokens stored on this server"
+            className="inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium text-fg-muted transition-colors hover:bg-surface-muted hover:text-fg"
+          >
+            Tokens
+          </a>
+
           <ThemeToggle />
 
           {viewer ? (

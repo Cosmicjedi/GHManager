@@ -33,8 +33,12 @@ npm run dev                    # http://localhost:3000
 ```
 
 On first load you get a token screen. Paste a GitHub personal access token and
-GHManager verifies it against `GET /user` before storing it. Alternatively set
-`GITHUB_TOKEN` in `.env.local` and the app starts already connected.
+GHManager verifies it against `GET /user` before storing it. To share one token
+with everyone who opens the app - and skip the sign-in step entirely - add a
+**server token** on the `/tokens` page instead: it is stored on the server,
+survives restarts, and can be rotated or removed from the same page. Setting
+`GITHUB_TOKEN` in the environment still works as a fallback, but tokens managed
+on `/tokens` take priority over it.
 
 ## Run it in Docker
 
@@ -247,12 +251,20 @@ the summary panel lists each failure with a **Retry failed** button.
 ## Security notes
 
 - The token is read on the server from an httpOnly, `SameSite=Strict`,
-  path-scoped cookie (`Secure` in production) or from `GITHUB_TOKEN`. It is
-  never placed in `localStorage` and never reaches client JavaScript.
-- A cookie token takes precedence over the environment token, so you can act as
-  a different identity without restarting the server. A token supplied by the
-  server is marked "server token" in the UI and cannot be cleared from the
-  browser.
+  path-scoped cookie (`Secure` in production), from the managed token store, or
+  from `GITHUB_TOKEN`. It is never placed in `localStorage` and never reaches
+  client JavaScript.
+- A cookie token takes precedence over the stored token, which takes precedence
+  over the environment token - so you can act as a different identity without
+  restarting the server. A token supplied by the server is marked "server
+  token" in the UI and cannot be cleared from the browser.
+- Server tokens added on `/tokens` are validated against GitHub, then persisted
+  as JSON in the data directory (`GHMANAGER_DATA_DIR`, `/app/data` in the
+  container - mount a volume there). The file is written with owner-only
+  permissions, and the API only ever returns a mask (`ghp_...abcd`) and
+  metadata - a stored token can be used and removed, never read back.
+- Anyone who can reach the app can manage server tokens - the same trust
+  boundary as the rest of GHManager, so keep it on a trusted network.
 - A cookie token that GitHub rejects is cleared automatically.
 - Cache keys are `sha256(token).slice(0, 32)` — raw tokens never sit in a map.
 - Bulk merges are capped at 100 items per request.
