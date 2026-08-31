@@ -6,6 +6,7 @@ import type {
   PullRequest,
   PullRequestsPayload,
   PullsStreamLine,
+  ServerTokensPayload,
 } from "@/lib/types";
 
 /** Error raised when a GHManager API route answers with a non-2xx status. */
@@ -265,6 +266,46 @@ async function readPullsStream(
       // The stream is already done or errored; nothing to clean up.
     });
   }
+}
+
+/** List the tokens stored on the server (metadata only). */
+export function getServerTokens(): Promise<ServerTokensPayload> {
+  return request<ServerTokensPayload>("/api/tokens");
+}
+
+/** Add a server token; the server validates it against GitHub first. */
+export function addServerToken(input: {
+  token: string;
+  label?: string;
+  makeActive?: boolean;
+}): Promise<ServerTokensPayload> {
+  return request<ServerTokensPayload>("/api/tokens", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Make a stored token the one that drives the dashboard. */
+export function activateServerToken(id: string): Promise<ServerTokensPayload> {
+  return request<ServerTokensPayload>("/api/tokens", {
+    method: "PATCH",
+    body: JSON.stringify({ id, active: true }),
+  });
+}
+
+/** Rename a stored token. */
+export function relabelServerToken(id: string, label: string): Promise<ServerTokensPayload> {
+  return request<ServerTokensPayload>("/api/tokens", {
+    method: "PATCH",
+    body: JSON.stringify({ id, label }),
+  });
+}
+
+/** Remove a stored token. */
+export function removeServerToken(id: string): Promise<ServerTokensPayload> {
+  return request<ServerTokensPayload>(`/api/tokens?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 export interface MergeRequestPayload {

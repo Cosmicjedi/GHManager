@@ -12,6 +12,7 @@ import {
   readPullRequestCache,
   writePullRequestCache,
 } from "@/lib/server/pullCache";
+import { clearStoredTokens, upsertStoredToken } from "@/lib/server/tokenStore";
 import { MockGitHub, RATE_LIMIT } from "~tests/mockGitHub";
 import { rawPullRequest, rawRepository, resetFactories } from "~tests/factories";
 
@@ -69,6 +70,7 @@ beforeEach(() => {
   resetFactories();
   clearTrackedTokens();
   clearPullRequestCache();
+  clearStoredTokens();
   vi.stubEnv("GITHUB_TOKEN", "");
   vi.stubEnv("GH_TOKEN", "");
 });
@@ -80,6 +82,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   clearTrackedTokens();
   clearPullRequestCache();
+  clearStoredTokens();
 });
 
 describe("refreshTrackedTokens", () => {
@@ -104,6 +107,19 @@ describe("refreshTrackedTokens", () => {
 
     expect(isTokenTracked(ENV_TOKEN)).toBe(true);
     expect(readPullRequestCache(ENV_TOKEN)).not.toBeNull();
+  });
+
+  it("always includes tokens from the managed store", async () => {
+    vi.stubGlobal("fetch", workingGitHub().fetch);
+    upsertStoredToken({
+      token: COOKIE_TOKEN,
+      viewer: { login: "octocat", name: null, avatarUrl: null, url: "" },
+    });
+
+    await refreshTrackedTokens();
+
+    expect(isTokenTracked(COOKIE_TOKEN)).toBe(true);
+    expect(readPullRequestCache(COOKIE_TOKEN)).not.toBeNull();
   });
 
   it("drops a token GitHub rejects and clears its cache", async () => {

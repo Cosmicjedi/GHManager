@@ -8,6 +8,7 @@ import {
   writePullRequestCache,
 } from "@/lib/server/pullCache";
 import { refreshIntervalMs } from "@/lib/server/refreshConfig";
+import { listStoredTokens } from "@/lib/server/tokenStore";
 
 /**
  * Server-side background refresh.
@@ -67,6 +68,14 @@ export function isTokenTracked(token: string): boolean {
   return tracked.has(tokenFingerprint(token));
 }
 
+/**
+ * Forget a token by its fingerprint - used when a stored token is removed
+ * from the management UI so the loop stops scanning for it.
+ */
+export function untrackToken(fingerprint: string): void {
+  tracked.delete(fingerprint);
+}
+
 /** Test helper - forgets every tracked token. */
 export function clearTrackedTokens(): void {
   tracked.clear();
@@ -74,10 +83,14 @@ export function clearTrackedTokens(): void {
 
 /** Run one refresh cycle: re-scan GitHub for every live token. */
 export async function refreshTrackedTokens(): Promise<void> {
-  // The environment token is always refreshed while the process runs; its
-  // last-used time is bumped every cycle so it can never idle out.
+  // The environment token and every token in the managed store are always
+  // refreshed while the process runs; their last-used times are bumped every
+  // cycle so they can never idle out.
   const envToken = environmentToken();
   if (envToken) trackTokenForBackgroundRefresh(envToken);
+  for (const stored of listStoredTokens().tokens) {
+    trackTokenForBackgroundRefresh(stored.token);
+  }
 
   const now = Date.now();
   for (const [fingerprint, entry] of tracked) {

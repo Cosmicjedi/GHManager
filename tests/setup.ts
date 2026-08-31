@@ -1,7 +1,14 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
 import { server } from "~tests/server";
+
+// Every worker gets its own managed-token store so tests never touch the
+// repository's data directory or each other's tokens.
+process.env.GHMANAGER_DATA_DIR = mkdtempSync(join(tmpdir(), "ghmanager-test-"));
 
 // jsdom does not implement matchMedia, which the theme handling touches.
 if (!window.matchMedia) {

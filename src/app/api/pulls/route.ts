@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { resolveToken } from "@/lib/auth";
 import { GitHubClient } from "@/lib/github/client";
 import { GitHubError } from "@/lib/github/errors";
 import { fetchAllOpenPullRequests } from "@/lib/github/pulls";
@@ -9,6 +8,7 @@ import {
   readPullRequestCache,
   writePullRequestCache,
 } from "@/lib/server/pullCache";
+import { resolveRequestToken } from "@/lib/server/requestToken";
 import type { PullRequest, PullRequestsPayload, PullsStreamLine } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -47,7 +47,7 @@ function shapeError(error: unknown): PullsErrorResponse & { status: number } {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const { token } = resolveToken(request);
+  const { token } = resolveRequestToken(request);
 
   if (!token) {
     return NextResponse.json<PullsErrorResponse>(

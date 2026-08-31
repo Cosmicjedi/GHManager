@@ -275,3 +275,60 @@ describe("DELETE /api/auth", () => {
     expect(body.error).toContain("not usable");
   });
 });
+
+describe("stored server tokens", () => {
+  it("reports a stored token as server-managed for GET", async () => {
+    const { upsertStoredToken, clearStoredTokens } = await import(
+      "@/lib/server/tokenStore"
+    );
+    clearStoredTokens();
+    upsertStoredToken({
+      token: VALID_TOKEN,
+      viewer: {
+        login: "octocat",
+        name: null,
+        avatarUrl: null,
+        url: "https://github.com/octocat",
+      },
+    });
+    const github = new MockGitHub().onRest("GET", "/user", () => userHandler());
+    vi.stubGlobal("fetch", github.fetch);
+
+    const response = await GET(authRequest());
+    const body = await response.json();
+
+    expect(body.authenticated).toBe(true);
+    expect(body.source).toBe("stored");
+    expect(body.managedByServer).toBe(true);
+
+    clearStoredTokens();
+  });
+
+  it("falls back to the stored token after sign out, ahead of the environment", async () => {
+    const { upsertStoredToken, clearStoredTokens } = await import(
+      "@/lib/server/tokenStore"
+    );
+    clearStoredTokens();
+    vi.stubEnv("GITHUB_TOKEN", "ghp_env_token_0123456789abcde");
+    upsertStoredToken({
+      token: VALID_TOKEN,
+      viewer: {
+        login: "octocat",
+        name: null,
+        avatarUrl: null,
+        url: "https://github.com/octocat",
+      },
+    });
+    const github = new MockGitHub().onRest("GET", "/user", () => userHandler());
+    vi.stubGlobal("fetch", github.fetch);
+
+    const response = await DELETE(authRequest({ cookie: `${TOKEN_COOKIE}=${VALID_TOKEN}` }));
+    const body = await response.json();
+
+    expect(body.authenticated).toBe(true);
+    expect(body.source).toBe("stored");
+    expect(body.managedByServer).toBe(true);
+
+    clearStoredTokens();
+  });
+});
