@@ -7,12 +7,25 @@ import { rawPullRequest, rawRepository, resetFactories } from "~tests/factories"
 
 const TOKEN = "ghp_0123456789abcdefghijklmno";
 
-function pullsRequest(options: { refresh?: boolean; cookie?: string | null } = {}): Request {
+function pullsRequest(
+  options: { refresh?: boolean; stream?: boolean; cookie?: string | null } = {},
+): Request {
   const cookie = options.cookie === undefined ? `${TOKEN_COOKIE}=${TOKEN}` : options.cookie;
-  return new Request(
-    `http://localhost:3000/api/pulls${options.refresh ? "?refresh=1" : ""}`,
-    { headers: cookie ? { cookie } : {} },
-  );
+  const params = new URLSearchParams();
+  if (options.stream) params.set("stream", "1");
+  if (options.refresh) params.set("refresh", "1");
+  const query = params.toString();
+  return new Request(`http://localhost:3000/api/pulls${query ? `?${query}` : ""}`, {
+    headers: cookie ? { cookie } : {},
+  });
+}
+
+async function readStreamLines(response: Response): Promise<Array<Record<string, unknown>>> {
+  const text = await response.text();
+  return text
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 function workingGitHub(): MockGitHub {
@@ -172,6 +185,69 @@ describe("GET /api/pulls", () => {
     expect(response.status).toBe(502);
     expect(body.requiresAuth).toBe(false);
     expect(body.error).toBe("Server Error");
+  });
+
+  it("streams progress lines and a final complete payload when stream=1", async () => {
+    vi.stubGlobal("fetch", workingGitHub().fetch);
+
+    const response = await GET(pullsRequest({ stream: true }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/x-ndjson");
+
+    const lines = await readStreamLines(response);
+    expect(lines.some((line) => line.kind === "progress")).toBe(true);
+
+    const last = lines.at(-1) as {
+      kind: string;
+      payload: { pullRequests: unknown[]; cached: boolean };
+    };
+    expect(last.kind).toBe("complete");
+    expect(last.payload.pullRequests).toHaveLength(1);
+    expect(last.payload.cached).toBe(false);
+
+    // Each pull request travels at most once across all progress lines.
+    const progressIds = lines
+      .filter((line) => line.kind === "progress")
+      .flatMap((line) =>
+        (line.pullRequests as Array<{ id: string }>).map((pullRequest) => pullRequest.id),
+      );
+    expect(new Set(progressIds).size).toBe(progressIds.length);
+  });
+
+  it("streams a cached payload as a single complete line without hitting GitHub", async () => {
+    const github = workingGitHub();
+    vi.stubGlobal("fetch", github.fetch);
+
+    await GET(pullsRequest());
+    const callsAfterFirst = github.graphqlCalls.length;
+
+    const response = await GET(pullsRequest({ stream: true }));
+    const lines = await readStreamLines(response);
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ kind: "complete" });
+    expect((lines[0].payload as { cached: boolean }).cached).toBe(true);
+    expect(github.graphqlCalls.length).toBe(callsAfterFirst);
+  });
+
+  it("streams a GitHub failure as an error line with the real status", async () => {
+    const github = new MockGitHub().onGraphQL("RepositoryInventory", () => ({
+      status: 401,
+      body: { message: "Bad credentials" },
+    }));
+    vi.stubGlobal("fetch", github.fetch);
+
+    const response = await GET(pullsRequest({ stream: true }));
+
+    // Headers are already committed when the scan fails, so HTTP stays 200.
+    expect(response.status).toBe(200);
+    const lines = await readStreamLines(response);
+    expect(lines.at(-1)).toMatchObject({
+      kind: "error",
+      status: 401,
+      requiresAuth: true,
+    });
   });
 
   it("reports repository level warnings without failing the request", async () => {

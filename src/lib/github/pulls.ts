@@ -1,4 +1,4 @@
-import { chunk, mapWithConcurrency } from "@/lib/concurrency";
+import { createLimiter } from "@/lib/concurrency";
 import type { GitHubClient } from "@/lib/github/client";
 import { GitHubError } from "@/lib/github/errors";
 import { mapPullRequest, mapRepository } from "@/lib/github/mappers";
@@ -49,22 +49,20 @@ export async function fetchViewer(client: GitHubClient): Promise<Viewer> {
 }
 
 /**
- * Pass 1 - walk every repository the viewer can reach and keep only the ones
- * that actually have open pull requests. This keeps the expensive detail
- * queries proportional to the work, not to the size of the account.
+ * Walk the repository inventory page by page, handing each page's new
+ * repositories to the caller as soon as GitHub returns them.
  */
-export async function fetchRepositoryInventory(
+async function walkInventoryPages(
   client: GitHubClient,
-  options: FetchOptions = {},
-): Promise<{ all: RepositorySummary[]; withOpenPullRequests: RepositorySummary[] }> {
-  const settings = { ...DEFAULTS, ...options };
-  const all: RepositorySummary[] = [];
+  settings: Required<FetchOptions>,
+  onPage: (added: RepositorySummary[]) => void,
+): Promise<void> {
   const seen = new Set<string>();
-
+  let total = 0;
   let cursor: string | null = null;
   let hasNextPage = true;
 
-  while (hasNextPage && all.length < settings.maxRepositories) {
+  while (hasNextPage && total < settings.maxRepositories) {
     const result = await client.graphql<RawInventoryResponse>(REPOSITORY_INVENTORY_QUERY, {
       cursor,
       pageSize: Math.min(settings.repositoryPageSize, 100),
@@ -76,16 +74,36 @@ export async function fetchRepositoryInventory(
       (node): node is RawRepository => Boolean(node),
     );
 
+    const added: RepositorySummary[] = [];
     for (const node of nodes) {
       if (seen.has(node.nameWithOwner)) continue;
       seen.add(node.nameWithOwner);
-      all.push(mapRepository(node));
+      added.push(mapRepository(node));
     }
+    total += added.length;
+    onPage(added);
 
     hasNextPage = Boolean(connection.pageInfo?.hasNextPage);
     cursor = connection.pageInfo?.endCursor ?? null;
     if (!cursor) break;
   }
+}
+
+/**
+ * Pass 1 - walk every repository the viewer can reach and keep only the ones
+ * that actually have open pull requests. This keeps the expensive detail
+ * queries proportional to the work, not to the size of the account.
+ */
+export async function fetchRepositoryInventory(
+  client: GitHubClient,
+  options: FetchOptions = {},
+): Promise<{ all: RepositorySummary[]; withOpenPullRequests: RepositorySummary[] }> {
+  const settings = { ...DEFAULTS, ...options };
+  const all: RepositorySummary[] = [];
+
+  await walkInventoryPages(client, settings, (added) => {
+    all.push(...added);
+  });
 
   const withOpenPullRequests = all.filter(
     (repository) => repository.openPullRequestCount > 0 && !repository.isArchived,
@@ -223,39 +241,71 @@ async function fetchRemainingPullRequests(
   return collected;
 }
 
+/** Everything a pulls payload carries except the cache marker. */
+export type PullsSnapshot = Omit<PullRequestsPayload, "cached">;
+
 /**
  * Fetch every open pull request across every repository the token can reach,
  * newest activity first.
+ *
+ * Detail batches start as soon as enough repositories are known instead of
+ * waiting for the full inventory walk, and `onProgress` fires with a cumulative
+ * snapshot after every inventory page and every completed batch - so a caller
+ * can show results while the scan is still running.
  */
 export async function fetchAllOpenPullRequests(
   client: GitHubClient,
   options: FetchOptions = {},
-): Promise<Omit<PullRequestsPayload, "cached">> {
+  onProgress?: (snapshot: PullsSnapshot) => void,
+): Promise<PullsSnapshot> {
   const settings = { ...DEFAULTS, ...options };
   const warnings: string[] = [];
-
-  const inventory = await fetchRepositoryInventory(client, settings);
-  const batches = chunk(inventory.withOpenPullRequests, settings.repositoryBatchSize);
-
-  const batchResults = await mapWithConcurrency(batches, settings.concurrency, (batch) =>
-    fetchBatch(client, batch, settings, warnings),
-  );
-
   const byId = new Map<string, PullRequest>();
-  for (const pullRequest of batchResults.flat()) {
-    byId.set(pullRequest.id, pullRequest);
-  }
+  let repositoriesScanned = 0;
+  let repositoriesWithOpenPullRequests = 0;
 
-  const pullRequests = [...byId.values()].sort(
-    (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
-  );
-
-  return {
-    pullRequests,
-    repositoriesScanned: inventory.all.length,
-    repositoriesWithOpenPullRequests: inventory.withOpenPullRequests.length,
+  const snapshot = (): PullsSnapshot => ({
+    pullRequests: [...byId.values()].sort(
+      (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+    ),
+    repositoriesScanned,
+    repositoriesWithOpenPullRequests,
     rateLimit: client.getRateLimit(),
     fetchedAt: new Date().toISOString(),
-    warnings,
+    warnings: [...warnings],
+  });
+
+  const limit = createLimiter(settings.concurrency);
+  const inFlight: Promise<void>[] = [];
+  let pending: RepositorySummary[] = [];
+
+  const scheduleBatch = (batch: RepositorySummary[]) => {
+    inFlight.push(
+      limit(async () => {
+        const collected = await fetchBatch(client, batch, settings, warnings);
+        for (const pullRequest of collected) byId.set(pullRequest.id, pullRequest);
+        onProgress?.(snapshot());
+      }),
+    );
   };
+
+  await walkInventoryPages(client, settings, (added) => {
+    repositoriesScanned += added.length;
+    for (const repository of added) {
+      if (repository.openPullRequestCount > 0 && !repository.isArchived) {
+        repositoriesWithOpenPullRequests += 1;
+        pending.push(repository);
+      }
+    }
+    while (pending.length >= settings.repositoryBatchSize) {
+      scheduleBatch(pending.slice(0, settings.repositoryBatchSize));
+      pending = pending.slice(settings.repositoryBatchSize);
+    }
+    onProgress?.(snapshot());
+  });
+
+  if (pending.length > 0) scheduleBatch(pending);
+  await Promise.all(inFlight);
+
+  return snapshot();
 }

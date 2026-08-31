@@ -399,6 +399,49 @@ describe("fetchAllOpenPullRequests", () => {
     expect(Date.parse(payload.fetchedAt)).not.toBeNaN();
   });
 
+  it("reports cumulative progress snapshots while the scan runs", async () => {
+    const github = new MockGitHub()
+      .onGraphQL("RepositoryInventory", () =>
+        inventoryPage(
+          [
+            rawRepository({ nameWithOwner: "acme/one", pullRequests: { totalCount: 1 } }),
+            rawRepository({ nameWithOwner: "acme/two", pullRequests: { totalCount: 1 } }),
+          ],
+          { hasNextPage: false, endCursor: null },
+        ),
+      )
+      .onGraphQL("RepositoryPullRequests", (call) => ({
+        body: {
+          data: {
+            rateLimit: RATE_LIMIT,
+            r0: rawRepository({
+              nameWithOwner: `${call.variables.owner0}/${call.variables.name0}`,
+              pullRequests: {
+                totalCount: 1,
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [rawPullRequest({ number: call.variables.name0 === "one" ? 1 : 2 })],
+              },
+            }),
+          },
+        },
+      }));
+
+    const counts: number[] = [];
+    const payload = await fetchAllOpenPullRequests(
+      new GitHubClient("ghp_token", github.fetch),
+      { repositoryBatchSize: 1 },
+      (snapshot) => counts.push(snapshot.pullRequests.length),
+    );
+
+    expect(payload.pullRequests).toHaveLength(2);
+    // At least one snapshot fired before everything was in, and the counts
+    // only ever grow.
+    expect(counts.length).toBeGreaterThanOrEqual(2);
+    expect(counts[0]).toBeLessThan(2);
+    expect(counts.at(-1)).toBe(2);
+    expect([...counts].sort((a, b) => a - b)).toEqual(counts);
+  });
+
   it("returns an empty payload when nothing has open pull requests", async () => {
     const github = new MockGitHub().onGraphQL("RepositoryInventory", () =>
       inventoryPage([rawRepository({ nameWithOwner: "acme/quiet", pullRequests: { totalCount: 0 } })], {

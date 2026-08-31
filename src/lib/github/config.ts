@@ -10,6 +10,13 @@ export const GITHUB_GRAPHQL_URL =
 export const USER_AGENT = "GHManager/1.0";
 
 /**
+ * Ceiling on a single HTTP round trip to GitHub. A socket that stalls without
+ * ever erroring would otherwise hang an API route - and with it the merge
+ * dialog or refresh that is waiting on the answer.
+ */
+export const GITHUB_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
  * `mergeStateStatus` is still behind a preview media type on some GitHub
  * deployments, so we always request it explicitly.
  */

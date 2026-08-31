@@ -165,6 +165,27 @@ export interface PullRequestsPayload {
   cached: boolean;
 }
 
+/**
+ * One NDJSON line of the streaming `/api/pulls?stream=1` response.
+ *
+ * `progress` lines carry only the pull requests discovered since the previous
+ * line (the client accumulates them), plus the running counters. A `complete`
+ * line always ends a successful stream; an `error` line ends a failed one -
+ * the HTTP status is always 200 by then, so the real status rides in the line.
+ */
+export type PullsStreamLine =
+  | {
+      kind: "progress";
+      pullRequests: PullRequest[];
+      repositoriesScanned: number;
+      repositoriesWithOpenPullRequests: number;
+      rateLimit: RateLimitInfo | null;
+      fetchedAt: string;
+      warnings: string[];
+    }
+  | { kind: "complete"; payload: PullRequestsPayload }
+  | { kind: "error"; error: string; code: string; status: number; requiresAuth: boolean };
+
 export interface MergeRequestItem {
   owner: string;
   repo: string;

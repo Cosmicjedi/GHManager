@@ -50,10 +50,20 @@ export function useAuth() {
 export function usePullRequests(enabled: boolean) {
   const queryClient = useQueryClient();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Growing partial payload while a streamed scan is in flight, null otherwise.
+  // The dashboard renders it when there is no settled data yet, so the first
+  // load shows rows as they are found instead of a skeleton for the whole scan.
+  const [progress, setProgress] = useState<PullRequestsPayload | null>(null);
 
   const query = useQuery<PullRequestsPayload>({
     queryKey: PULLS_QUERY_KEY,
-    queryFn: () => getPullRequests(),
+    queryFn: async () => {
+      try {
+        return await getPullRequests({ onProgress: setProgress });
+      } finally {
+        setProgress(null);
+      }
+    },
     enabled,
   });
 
@@ -61,15 +71,16 @@ export function usePullRequests(enabled: boolean) {
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const payload = await getPullRequests({ refresh: true });
+      const payload = await getPullRequests({ refresh: true, onProgress: setProgress });
       queryClient.setQueryData(PULLS_QUERY_KEY, payload);
       return payload;
     } finally {
+      setProgress(null);
       setIsRefreshing(false);
     }
   }, [queryClient]);
 
-  return { query, refresh, isRefreshing };
+  return { query, refresh, isRefreshing, progress };
 }
 
 /** Merge one or many pull requests. */

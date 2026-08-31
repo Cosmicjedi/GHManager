@@ -26,6 +26,30 @@ export async function mapWithConcurrency<TInput, TOutput>(
   return results;
 }
 
+/**
+ * A gate that lets at most `limit` tasks run at once. Unlike
+ * `mapWithConcurrency` the task list does not need to be known up front, so a
+ * producer can keep submitting work while earlier tasks are still running.
+ */
+export function createLimiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
+  const effectiveLimit = Math.max(1, Math.floor(limit) || 1);
+  let active = 0;
+  const waiting: Array<() => void> = [];
+
+  return async function run<T>(task: () => Promise<T>): Promise<T> {
+    if (active >= effectiveLimit) {
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
+    active += 1;
+    try {
+      return await task();
+    } finally {
+      active -= 1;
+      waiting.shift()?.();
+    }
+  };
+}
+
 /** Split a list into fixed-size chunks. */
 export function chunk<T>(items: readonly T[], size: number): T[][] {
   const chunkSize = Math.max(1, Math.floor(size) || 1);
