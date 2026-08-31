@@ -30,7 +30,7 @@ export function Dashboard() {
   const { query: authQuery, signInMutation, signOutMutation } = useAuth();
   const authenticated = authQuery.data?.authenticated === true;
 
-  const { query: pullsQuery, refresh, isRefreshing } = usePullRequests(authenticated);
+  const { query: pullsQuery, refresh, isRefreshing, progress } = usePullRequests(authenticated);
 
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -45,9 +45,13 @@ export function Dashboard() {
   const [summary, setSummary] = useState<MergePayload | null>(null);
   const [mergeError, setMergeError] = useState<string | null>(null);
 
+  // Before the first scan settles, render the partial payload streamed so far
+  // instead of a skeleton - a large account takes minutes to walk in full.
+  const displayPayload = pullsQuery.data ?? progress ?? null;
+
   const fetchedPullRequests = useMemo(
-    () => pullsQuery.data?.pullRequests ?? [],
-    [pullsQuery.data],
+    () => displayPayload?.pullRequests ?? [],
+    [displayPayload],
   );
 
   // Stop suppressing a merged pull request once GitHub stops reporting it as
@@ -144,9 +148,15 @@ export function Dashboard() {
     async (targets: PullRequest[]) => {
       if (targets.length === 0) return;
 
+      const targetIds = targets.map((pullRequest) => pullRequest.id);
+
       setMergeError(null);
       setSummary(null);
-      setMergingIds(new Set(targets.map((pullRequest) => pullRequest.id)));
+      // Close the confirm dialog before anything goes over the wire. The rows
+      // show their own "Merging" state while GitHub answers, so keeping a
+      // modal up only makes a slow request look like a hung one.
+      setPendingMerge(null);
+      setMergingIds((current) => new Set([...current, ...targetIds]));
 
       // The API answers with owner/repo/number, so keep a lookup back to ids.
       const idByKey = new Map<string, string>();
@@ -208,11 +218,12 @@ export function Dashboard() {
           error instanceof Error ? error.message : "The merge request could not be sent.",
         );
       } finally {
-        // Close the dialog as soon as GitHub has answered. The refresh below
-        // re-walks every repository and can take a while; leaving the modal up
-        // for that makes a finished merge look like a hung one.
-        setMergingIds(new Set());
-        setPendingMerge(null);
+        // Only release this run's rows - another merge may still be in flight.
+        setMergingIds((current) => {
+          const next = new Set(current);
+          for (const id of targetIds) next.delete(id);
+          return next;
+        });
       }
 
       if (mergeAnswered) {
@@ -279,6 +290,8 @@ export function Dashboard() {
 
   const pullsError = pullsQuery.error;
   const isInitialLoad = pullsQuery.isLoading;
+  // Only fall back to the skeleton while nothing at all has streamed in yet.
+  const showSkeleton = isInitialLoad && fetchedPullRequests.length === 0;
 
   return (
     <div className="min-h-dvh bg-canvas">
@@ -350,7 +363,15 @@ export function Dashboard() {
           isMerging={mergeMutation.isPending}
         />
 
-        {isInitialLoad ? (
+        {progress ? (
+          <p role="status" className="text-xs text-fg-muted">
+            Scanning repositories... {progress.repositoriesScanned} scanned ·{" "}
+            {progress.repositoriesWithOpenPullRequests} with open pull requests ·{" "}
+            {progress.pullRequests.length} loaded so far
+          </p>
+        ) : null}
+
+        {showSkeleton ? (
           <TableSkeleton />
         ) : visiblePullRequests.length === 0 ? (
           <EmptyState

@@ -1,6 +1,7 @@
 import {
   GITHUB_API_BASE_URL,
   GITHUB_GRAPHQL_URL,
+  GITHUB_REQUEST_TIMEOUT_MS,
   GRAPHQL_ACCEPT,
   USER_AGENT,
 } from "@/lib/github/config";
@@ -86,12 +87,10 @@ export class GitHubClient {
         }),
         body: JSON.stringify({ query, variables }),
         cache: "no-store",
+        signal: requestTimeoutSignal(),
       });
     } catch (cause) {
-      throw new GitHubError(
-        `Could not reach GitHub: ${(cause as Error).message}`,
-        { status: 0, code: "NETWORK" },
-      );
+      throw toNetworkError(cause);
     }
 
     const body = await readBody(response);
@@ -165,12 +164,10 @@ export class GitHubClient {
         }),
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         cache: "no-store",
+        signal: requestTimeoutSignal(),
       });
     } catch (cause) {
-      throw new GitHubError(
-        `Could not reach GitHub: ${(cause as Error).message}`,
-        { status: 0, code: "NETWORK" },
-      );
+      throw toNetworkError(cause);
     }
 
     const body = await readBody(response);
@@ -206,6 +203,27 @@ export class GitHubClient {
       usedThisRequest: this.pointsUsed,
     };
   }
+}
+
+function requestTimeoutSignal(): AbortSignal | undefined {
+  // Guarded because some test environments polyfill fetch without AbortSignal.timeout.
+  return typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+    ? AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)
+    : undefined;
+}
+
+function toNetworkError(cause: unknown): GitHubError {
+  const error = cause as Error;
+  if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+    return new GitHubError(
+      `GitHub did not answer within ${Math.round(GITHUB_REQUEST_TIMEOUT_MS / 1000)} seconds.`,
+      { status: 0, code: "NETWORK" },
+    );
+  }
+  return new GitHubError(`Could not reach GitHub: ${error.message}`, {
+    status: 0,
+    code: "NETWORK",
+  });
 }
 
 async function readBody(response: Response): Promise<unknown> {

@@ -3,7 +3,9 @@ import type {
   MergeMethod,
   MergePayload,
   MergeRequestItem,
+  PullRequest,
   PullRequestsPayload,
+  PullsStreamLine,
 } from "@/lib/types";
 
 /** Error raised when a GHManager API route answers with a non-2xx status. */
@@ -86,6 +88,11 @@ async function request<T>(input: string, init?: RequestOptions): Promise<T> {
     timeout.cancel();
   }
 
+  return parseJsonResponse<T>(response);
+}
+
+/** Parse a non-streaming API response, mapping error bodies to ApiError. */
+async function parseJsonResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   let body: unknown = null;
   if (text) {
@@ -126,12 +133,138 @@ export function signOut(): Promise<AuthResponse> {
   return request<AuthResponse>("/api/auth", { method: "DELETE" });
 }
 
-/** Load every open pull request the token can see. */
-export function getPullRequests(options: { refresh?: boolean } = {}): Promise<PullRequestsPayload> {
-  const query = options.refresh ? "?refresh=1" : "";
-  // Walking every repository on a large account is slow, so this one gets a
-  // much longer leash than the default.
-  return request<PullRequestsPayload>(`/api/pulls${query}`, { timeoutMs: 180_000 });
+/**
+ * How long the pull request stream may go silent before it is declared dead.
+ * A healthy scan produces a line every few seconds; the server times out its
+ * own GitHub calls at 30 seconds, so a minute of nothing means the connection
+ * is gone.
+ */
+const PULLS_STALL_TIMEOUT_MS = 60_000;
+
+/**
+ * Load every open pull request the token can see.
+ *
+ * The server streams results as it finds them; `onProgress` fires with a
+ * growing partial payload so the caller can render rows before the full scan
+ * finishes. A plain JSON response (e.g. from the short-lived cache path or a
+ * non-streaming server) is handled transparently.
+ */
+export async function getPullRequests(
+  options: {
+    refresh?: boolean;
+    onProgress?: (partial: PullRequestsPayload) => void;
+  } = {},
+): Promise<PullRequestsPayload> {
+  const params = new URLSearchParams({ stream: "1" });
+  if (options.refresh) params.set("refresh", "1");
+
+  let response: Response;
+  try {
+    response = await fetch(`/api/pulls?${params.toString()}`, {
+      headers: { Accept: "application/x-ndjson, application/json" },
+      credentials: "same-origin",
+    });
+  } catch (cause) {
+    throw new ApiError(
+      `Could not reach the GHManager server: ${(cause as Error).message}`,
+      0,
+    );
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!response.ok || !contentType.includes("application/x-ndjson") || !response.body) {
+    return parseJsonResponse<PullRequestsPayload>(response);
+  }
+
+  return readPullsStream(response.body, options.onProgress);
+}
+
+/** Consume the NDJSON pull request stream, surfacing partials along the way. */
+async function readPullsStream(
+  body: ReadableStream<Uint8Array>,
+  onProgress?: (partial: PullRequestsPayload) => void,
+): Promise<PullRequestsPayload> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const byId = new Map<string, PullRequest>();
+  let buffered = "";
+
+  const handleLine = (line: string): PullRequestsPayload | null => {
+    if (!line.trim()) return null;
+
+    let parsed: PullsStreamLine;
+    try {
+      parsed = JSON.parse(line) as PullsStreamLine;
+    } catch {
+      throw new ApiError("The GHManager server sent an unreadable response.", 0);
+    }
+
+    if (parsed.kind === "complete") return parsed.payload;
+    if (parsed.kind === "error") {
+      throw new ApiError(parsed.error, parsed.status, parsed.requiresAuth);
+    }
+
+    for (const pullRequest of parsed.pullRequests) byId.set(pullRequest.id, pullRequest);
+    onProgress?.({
+      pullRequests: [...byId.values()].sort(
+        (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+      ),
+      repositoriesScanned: parsed.repositoriesScanned,
+      repositoriesWithOpenPullRequests: parsed.repositoriesWithOpenPullRequests,
+      rateLimit: parsed.rateLimit,
+      fetchedAt: parsed.fetchedAt,
+      warnings: parsed.warnings,
+      cached: false,
+    });
+    return null;
+  };
+
+  try {
+    for (;;) {
+      const timeout = rejectAfter(PULLS_STALL_TIMEOUT_MS);
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await Promise.race([reader.read(), timeout.promise]);
+      } catch (cause) {
+        if (cause instanceof TimeoutError) {
+          throw new ApiError(
+            "The GHManager server stopped answering while loading pull requests. Refresh to try again.",
+            0,
+          );
+        }
+        throw cause instanceof ApiError
+          ? cause
+          : new ApiError(
+              `Could not read the pull request stream: ${(cause as Error).message}`,
+              0,
+            );
+      } finally {
+        timeout.cancel();
+      }
+
+      buffered += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
+
+      let newlineIndex: number;
+      while ((newlineIndex = buffered.indexOf("\n")) >= 0) {
+        const line = buffered.slice(0, newlineIndex);
+        buffered = buffered.slice(newlineIndex + 1);
+        const complete = handleLine(line);
+        if (complete) return complete;
+      }
+
+      if (chunk.done) break;
+    }
+
+    // A final line without a trailing newline still counts.
+    const complete = handleLine(buffered);
+    if (complete) return complete;
+
+    throw new ApiError("The pull request stream ended before it finished.", 0);
+  } finally {
+    reader.cancel().catch(() => {
+      // The stream is already done or errored; nothing to clean up.
+    });
+  }
 }
 
 export interface MergeRequestPayload {

@@ -283,6 +283,59 @@ describe("Dashboard data display", () => {
     await waitForTable();
   });
 
+  it("shows pull requests while the first scan is still streaming", async () => {
+    const encoder = new TextEncoder();
+    let releaseRest = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseRest = resolve;
+    });
+    const firstPr = readyPr();
+    const line = (value: unknown) => encoder.encode(`${JSON.stringify(value)}\n`);
+
+    server.use(
+      http.get(`${ORIGIN}/api/pulls`, () => {
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            controller.enqueue(
+              line({
+                kind: "progress",
+                pullRequests: [firstPr],
+                repositoriesScanned: 4,
+                repositoriesWithOpenPullRequests: 1,
+                rateLimit: null,
+                fetchedAt: "2026-08-31T00:00:00Z",
+                warnings: [],
+              }),
+            );
+            await held;
+            controller.enqueue(
+              line({ kind: "complete", payload: pullsPayload([firstPr, secondReadyPr()]) }),
+            );
+            controller.close();
+          },
+        });
+        return new HttpResponse(stream, {
+          headers: { "Content-Type": "application/x-ndjson" },
+        });
+      }),
+    );
+
+    await renderDashboard();
+
+    // The first streamed row renders while the scan is still running.
+    expect(await screen.findByTestId("pr-row-pr-ready")).toBeInTheDocument();
+    expect(screen.getByText(/Scanning repositories/)).toHaveTextContent("4 scanned");
+    expect(screen.queryByTestId("pr-row-pr-ready-2")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("table-skeleton")).not.toBeInTheDocument();
+
+    releaseRest();
+
+    expect(await screen.findByTestId("pr-row-pr-ready-2")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText(/Scanning repositories/)).not.toBeInTheDocument(),
+    );
+  });
+
   it("refetches with refresh=1 when Refresh is clicked", async () => {
     const requestedUrls: string[] = [];
     server.use(
@@ -581,6 +634,44 @@ describe("Dashboard bulk merge", () => {
     await user.click(within(summary).getByRole("button", { name: "Dismiss" }));
 
     await waitFor(() => expect(screen.queryByTestId("merge-summary")).not.toBeInTheDocument());
+  });
+
+  it("closes the dialog immediately after confirming, before the merge answers", async () => {
+    usePulls(pullsPayload([readyPr()]));
+    let releaseMerge = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseMerge = resolve;
+    });
+    server.use(
+      http.post(`${ORIGIN}/api/merge`, async () => {
+        await held;
+        return HttpResponse.json(allMerged([{ owner: "acme", repo: "api", number: 101 }]));
+      }),
+    );
+
+    const { user } = await renderDashboard();
+    await waitForTable();
+
+    await user.click(
+      within(screen.getByTestId("pr-row-pr-ready")).getByRole("button", { name: "Merge" }),
+    );
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Merge 1" }),
+    );
+
+    // The dialog is gone while GitHub has not answered yet; the row carries
+    // the in-flight state instead.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("merge-summary")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("pr-row-pr-ready")).getByRole("button", { name: "Merging" }),
+    ).toBeInTheDocument();
+
+    releaseMerge();
+
+    expect(await screen.findByTestId("merge-summary")).toHaveTextContent(
+      "Merged 1 pull request.",
+    );
   });
 
   it("closes the dialog as soon as the merge answers, without waiting on the refresh", async () => {
