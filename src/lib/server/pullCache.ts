@@ -1,8 +1,15 @@
 import { TtlCache, tokenFingerprint } from "@/lib/server/cache";
+import { refreshIntervalMs } from "@/lib/server/refreshConfig";
 import type { PullRequestsPayload } from "@/lib/types";
 
-/** Short cache so tab-focus refetches do not re-walk every repository. */
-export const PULL_CACHE_TTL_MS = 45_000;
+/**
+ * Entries must outlive one background refresh cycle plus some grace, so a
+ * page load between cycles is always served warm; the background refresher
+ * rewrites them well before they expire. If the refresher cannot keep up
+ * (network trouble, untracked token), the entry still ages out here and the
+ * next request falls back to a live scan.
+ */
+export const PULL_CACHE_TTL_MS = refreshIntervalMs() + 2 * 60_000;
 
 type CachedPayload = Omit<PullRequestsPayload, "cached">;
 

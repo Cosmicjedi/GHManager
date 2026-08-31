@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/pulls/route";
 import { TOKEN_COOKIE } from "@/lib/auth";
+import { clearTrackedTokens, isTokenTracked } from "@/lib/server/backgroundRefresh";
 import { clearPullRequestCache } from "@/lib/server/pullCache";
 import { MockGitHub, RATE_LIMIT } from "~tests/mockGitHub";
 import { rawPullRequest, rawRepository, resetFactories } from "~tests/factories";
@@ -65,6 +66,7 @@ function workingGitHub(): MockGitHub {
 beforeEach(() => {
   resetFactories();
   clearPullRequestCache();
+  clearTrackedTokens();
   vi.stubEnv("GITHUB_TOKEN", "");
   vi.stubEnv("GH_TOKEN", "");
 });
@@ -102,6 +104,15 @@ describe("GET /api/pulls", () => {
     expect(body.repositoriesWithOpenPullRequests).toBe(1);
     expect(body.cached).toBe(false);
     expect(body.rateLimit).toMatchObject({ limit: 5000 });
+  });
+
+  it("tracks the token so the background refresher keeps its cache warm", async () => {
+    vi.stubGlobal("fetch", workingGitHub().fetch);
+
+    expect(isTokenTracked(TOKEN)).toBe(false);
+    await GET(pullsRequest());
+
+    expect(isTokenTracked(TOKEN)).toBe(true);
   });
 
   it("serves the second identical request from the cache", async () => {
